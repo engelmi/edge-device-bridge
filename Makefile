@@ -1,2 +1,2 @@
 build:
-	go build -o bin/device-bridge main.go
+	go build -o bin/device-bridge cmd/main.go
