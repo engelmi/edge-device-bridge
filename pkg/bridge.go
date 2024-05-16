@@ -17,6 +17,7 @@ const TopicRegister = TopicBase + "register"
 
 type EdgeBridge struct {
 	systemID       string
+	systemType     string
 	mqttClient     *mqtt.MQTTClient
 	bluechiClient  *bluechi.BlueChiClient
 	bluechiMonitor *bluechi.Monitor
@@ -43,7 +44,8 @@ func NewEdgeBridge(mqttClient *mqtt.MQTTClient,
 	topicDeviceUpdate := fmt.Sprintf("%s/update", topicBaseDevice)
 
 	return &EdgeBridge{
-		systemID: mqttClient.ClientID,
+		systemID:   mqttClient.ClientID,
+		systemType: "VeryEdgy",
 
 		mqttClient:     mqttClient,
 		bluechiClient:  bluechiClient,
@@ -93,13 +95,32 @@ func (bridge *EdgeBridge) updateStateNodeChanged(data []interface{}, name string
 		}
 		node := bridge.blueChiState.Nodes[nodeName]
 		node.Name = nodeName
-		node.Status = val.String()
+		node.Status = strings.Trim(val.String(), "\"")
 		if node.Status == "online" {
 			node.LastSeenTimestamp = "now"
+			units, err := bridge.bluechiClient.ListUnitsOn(nodeName)
+			if err != nil {
+				fmt.Printf("Failed to list units on '%s': %v\n", nodeName, err)
+				return
+			}
+
+			node.Services = map[string]SystemdService{}
+			for _, unit := range units {
+				unitName := unit[0].(string)
+				node.Services[unitName] = SystemdService{
+					Name:     unitName,
+					State:    unit[3].(string),
+					SubState: unit[4].(string),
+				}
+			}
 		} else {
 			node.LastSeenTimestamp = time.Now().Format(time.RFC3339)
 		}
-		node.Services = map[string]SystemdService{}
+		bridge.blueChiState.Nodes[nodeName] = node
+
+		// Publish right away
+		fmt.Printf("Published state update node %s, %s\n", nodeName, node.Status)
+		bridge.publishBlueChiStateUpdate()
 	}
 }
 
@@ -213,7 +234,10 @@ func (bridge *EdgeBridge) Start(ctx context.Context) error {
 		}
 	})
 
-	b, err := edgeapi.Marshal(edgeapi.RegisterRequest{DeviceID: bridge.systemID})
+	b, err := edgeapi.Marshal(edgeapi.RegisterRequest{
+		DeviceID:   bridge.systemID,
+		DeviceType: bridge.systemType,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal register request: %v", err)
 	}
@@ -270,6 +294,11 @@ func (bridge *EdgeBridge) publishBlueChiStateUpdate() error {
 	if err != nil {
 		return fmt.Errorf("failed marshalling update: %v", err)
 	}
+	fmt.Println()
+	fmt.Println()
+	fmt.Println(string(b))
+	fmt.Println()
+	fmt.Println()
 
 	err = bridge.mqttClient.Publish(bridge.topicDeviceUpdate, b)
 	if err != nil {

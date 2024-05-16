@@ -5,7 +5,8 @@ import (
 )
 
 type RegisterRequest struct {
-	DeviceID string `json:"device-id,omitempty"`
+	DeviceID   string `json:"device-id,omitempty"`
+	DeviceType string `json:"device-type,omitempty"`
 }
 
 type RegisterResponse struct {
